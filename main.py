@@ -2,43 +2,64 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-base_url = "https://lenta.ru/parts/news/1/"
+def fetch_url(session, url):
+    try:
+        response = session.get(url)
+        response.raise_for_status()
+        return response
+    except (requests.HTTPError, requests.ConnectionError) as e:
+        print(f"Failed to fetch {url}: {e}")
+        return None
 
-with requests.Session() as session:  # Используйте сессию для повторного использования соединений
-    response = session.get(base_url)
-    response.raise_for_status()  # Бросьте исключение, если запрос не удался
+def parse_news_list(session, url):
+    response = fetch_url(session, url)
+    if response is None:
+        return [], []
 
     soup = BeautifulSoup(response.text, 'lxml')
-
     news = soup.findAll('li', class_='parts-page__item')
 
     data_url = []
-    data_title =[]
+    data_title = []
     for ele in news:
-        try:
-            relative_url = ele.find('a', class_='card-full-news _parts-news').get("href")
-            url_news = urljoin(base_url, relative_url)  # Используйте urljoin для создания полного URL
-            title_news = ele.find('a', class_='card-full-news _parts-news').find('h3', class_="card-full-news__title").text
-            data_url.append(url_news)
-            data_title.append(title_news)
-        except AttributeError:
-            pass
+        link = ele.find('a', class_='card-full-news _parts-news')
+        if link is None:
+            continue
+        relative_url = link.get("href")
+        url_news = urljoin(url, relative_url)
+        title_news = link.find('h3', class_="card-full-news__title")
+        if title_news is None:
+            continue
+        data_url.append(url_news)
+        data_title.append(title_news.text)
+    return data_url, data_title
 
-    data_txt = []
-    for data in data_url:
-        try:
-            response = session.get(data)
-            response.raise_for_status()  # Бросьте исключение, если запрос не удался
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'lxml')
-                new_title = soup.find('div', class_="topic-body _news").find('div',class_="topic-body__content").text
-                data_txt.append(new_title)
-        except AttributeError:
-            pass
+def fetch_news_content(session, url):
+    response = fetch_url(session, url)
+    if response is None:
+        return None
 
-print(data_txt)
+    soup = BeautifulSoup(response.text, 'lxml')
+    content = soup.find('div', class_="topic-body _news")
+    if content is None:
+        return None
 
-with open('myfile.txt', 'w') as f:
-    # Проходим по каждому элементу списка и записываем его в файл
-    for item in data_txt:
-        f.write("%s\n" % item)
+    return content.find('div',class_="topic-body__content").text
+
+def main():
+    base_url = "https://lenta.ru/parts/news/1/"
+    with requests.Session() as session:
+        data_url, data_title = parse_news_list(session, base_url)
+
+        data_txt = []
+        for url in data_url:
+            news_content = fetch_news_content(session, url)
+            if news_content is not None:
+                data_txt.append(news_content)
+
+        with open('myfile.txt', 'w') as f:
+            for item in data_txt:
+                f.write("%s\n" % item)
+
+if __name__ == "__main__":
+    main()
